@@ -5,20 +5,28 @@ import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
+from guy_common import (
+    ACCENT_LIGHT, COLOR1, COLOR2, COLOR3, COLOR4, COLOR5, ERR, MUTED, OK,
+    TEXT, WARN, apply_ttk_theme, brand_bar, load_logo, load_settings,
+    save_setting, window_icon
+)
+
 
 DEFAULT_PORT = 8765
-BG = "#0f1115"
-PANEL = "#191c23"
-PURPLE = "#7c3aed"
-TEXT = "#e5e7eb"
+# Maior que o timeout de execução do servidor (30 s), para a resposta de um
+# comando longo nunca chegar depois de o cliente desistir.
+REQUEST_TIMEOUT = 45
+BG = COLOR4
+PANEL = COLOR3
+PURPLE = COLOR1
 
 
 class GuyClient:
     def __init__(self, root):
         self.root = root
         self.root.title("GUYLAB")
-        self.root.geometry("1150x760")
-        self.root.minsize(900, 600)
+        self.root.geometry("1150x800")
+        self.root.minsize(900, 720)
         self.root.configure(bg=BG)
 
         self.sock = None
@@ -46,18 +54,28 @@ class GuyClient:
         card = tk.Frame(outer, bg=PANEL, padx=45, pady=35)
         card.place(relx=0.5, rely=0.5, anchor="center")
 
+        logo = load_logo(128)
+
+        if logo is not None:
+            tk.Label(card, image=logo, bg=PANEL, bd=0).pack(pady=(0, 10))
+
         tk.Label(
             card, text="GUYLAB", font=("Segoe UI", 30, "bold"),
-            fg="#a78bfa", bg=PANEL
+            fg=ACCENT_LIGHT, bg=PANEL
         ).pack(pady=(0, 5))
 
         tk.Label(
             card, text="Autenticação centralizada pelo GUY ACCESS",
-            font=("Segoe UI", 10), fg="#9ca3af", bg=PANEL
+            font=("Segoe UI", 10), fg=MUTED, bg=PANEL
         ).pack(pady=(0, 25))
 
-        self.host_entry = self.field(card, "IP da Raspberry", "192.168.1.100")
-        self.port_entry = self.field(card, "Porta", str(DEFAULT_PORT))
+        saved = load_settings()
+        self.host_entry = self.field(
+            card, "IP da Raspberry", str(saved.get("lab_host", "192.168.1.100"))
+        )
+        self.port_entry = self.field(
+            card, "Porta", str(saved.get("lab_port", DEFAULT_PORT))
+        )
         self.username_entry = self.field(card, "Usuário", "")
         self.password_entry = self.field(card, "Senha", "", True)
 
@@ -66,12 +84,12 @@ class GuyClient:
         tk.Button(
             card, text="ENTRAR", command=self.login,
             font=("Segoe UI", 11, "bold"), bg=PURPLE, fg="white",
-            activebackground="#6d28d9", relief="flat",
+            activebackground=COLOR2, relief="flat",
             padx=40, pady=10, cursor="hand2"
         ).pack(pady=(10, 0))
 
         self.login_status = tk.Label(
-            card, text="Desconectado", fg="#9ca3af", bg=PANEL
+            card, text="Desconectado", fg=MUTED, bg=PANEL
         )
         self.login_status.pack(pady=(15, 0))
 
@@ -107,12 +125,12 @@ class GuyClient:
             messagebox.showerror("GUYLAB", "Preencha todos os campos.")
             return
 
-        self.login_status.config(text="Conectando...", fg="#f59e0b")
+        self.login_status.config(text="Conectando...", fg=WARN)
         self.root.update_idletasks()
 
         try:
             self.sock = socket.create_connection((host, port), timeout=5)
-            self.sock.settimeout(30)
+            self.sock.settimeout(REQUEST_TIMEOUT)
             self.file = self.sock.makefile("rb")
 
             response = self.request({
@@ -129,11 +147,14 @@ class GuyClient:
             self.permissions = response["permissions"]
             self.session = response["session"]
 
+            save_setting("lab_host", host)
+            save_setting("lab_port", port)
+
             self.build_main()
 
         except Exception as exc:
             self.disconnect()
-            self.login_status.config(text="Falha na conexão", fg="#ef4444")
+            self.login_status.config(text="Falha na conexão", fg=ERR)
             messagebox.showerror("GUYLAB", str(exc))
 
     def request(self, data, authenticated=True):
@@ -145,13 +166,23 @@ class GuyClient:
         if authenticated and self.session:
             payload["session"] = self.session
 
-        with self.lock:
-            self.sock.sendall(
-                (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
-            )
-            line = self.file.readline()
+        try:
+            with self.lock:
+                self.sock.sendall(
+                    (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+                )
+                line = self.file.readline()
+        except OSError as exc:
+            # Após um timeout a resposta ainda pode chegar e ser lida como se
+            # fosse a do próximo pedido. Por segurança a conexão é encerrada.
+            self.disconnect()
+            raise ConnectionError(
+                "Conexão com o servidor perdida. "
+                "Use 'Sair' e entre novamente."
+            ) from exc
 
         if not line:
+            self.disconnect()
             raise ConnectionError("O servidor encerrou a conexão.")
 
         response = json.loads(line.decode("utf-8"))
@@ -164,19 +195,22 @@ class GuyClient:
     def build_main(self):
         self.clear()
 
-        header = tk.Frame(self.root, bg=PANEL, height=55)
+        header = brand_bar(
+            self.root, "GUYLAB", "Autenticação centralizada pelo GUY ACCESS"
+        )
         header.pack(fill="x")
-        header.pack_propagate(False)
 
-        tk.Label(
-            header, text="GUYLAB", fg="#a78bfa", bg=PANEL,
-            font=("Segoe UI", 18, "bold")
-        ).pack(side="left", padx=18)
+        tk.Button(
+            header, text="Sair", command=self.logout,
+            bg=COLOR2, fg="white", activebackground=COLOR1,
+            activeforeground="white", relief="flat", padx=14, pady=4,
+            cursor="hand2"
+        ).pack(side="right", padx=(10, 0))
 
         tk.Label(
             header, text=f"Conectado: {self.user}",
-            fg="#22c55e", bg=PANEL
-        ).pack(side="right", padx=18)
+            fg=OK, bg=PANEL
+        ).pack(side="right", padx=10)
 
         self.tabs = ttk.Notebook(self.root)
         self.tabs.pack(fill="both", expand=True, padx=10, pady=10)
@@ -196,7 +230,7 @@ class GuyClient:
         tk.Label(
             footer,
             text=f"Usuário: {self.user}  •  Workspace: {self.workspace}",
-            fg="#9ca3af", bg=PANEL
+            fg=MUTED, bg=PANEL
         ).pack(anchor="w", padx=12, pady=6)
 
         if not self.permissions.get("manage_users"):
@@ -217,12 +251,12 @@ class GuyClient:
         split.add(main, minsize=500)
 
         tk.Label(
-            sidebar, text="ARQUIVOS", fg="#9ca3af", bg=PANEL,
+            sidebar, text="ARQUIVOS", fg=MUTED, bg=PANEL,
             font=("Segoe UI", 10, "bold")
         ).pack(anchor="w", padx=12, pady=10)
 
         self.file_list = tk.Listbox(
-            sidebar, bg=BG, fg=TEXT, selectbackground="#4c1d95",
+            sidebar, bg=BG, fg=TEXT, selectbackground=COLOR1,
             relief="flat", font=("Consolas", 10)
         )
         self.file_list.pack(fill="both", expand=True, padx=8, pady=5)
@@ -230,7 +264,7 @@ class GuyClient:
 
         tk.Button(
             sidebar, text="Atualizar", command=self.refresh_files,
-            bg="#303641", fg="white", relief="flat"
+            bg=COLOR2, fg="white", relief="flat"
         ).pack(fill="x", padx=8, pady=5)
 
         toolbar = tk.Frame(main, bg=PANEL)
@@ -249,19 +283,19 @@ class GuyClient:
         ).pack(side="right", padx=8, pady=5)
 
         self.editor = scrolledtext.ScrolledText(
-            main, bg="#0b0d10", fg=TEXT, insertbackground="white",
-            selectbackground="#4c1d95", font=("Consolas", 11),
+            main, bg=COLOR5, fg=TEXT, insertbackground="white",
+            selectbackground=COLOR1, font=("Consolas", 11),
             relief="flat", undo=True
         )
         self.editor.pack(fill="both", expand=True, padx=8, pady=8)
 
         tk.Label(
             main, text="TERMINAL REMOTO",
-            fg="#9ca3af", bg=BG
+            fg=MUTED, bg=BG
         ).pack(anchor="w", padx=10)
 
         self.terminal = scrolledtext.ScrolledText(
-            main, height=8, bg="#08090b", fg=TEXT,
+            main, height=8, bg=COLOR5, fg=TEXT,
             insertbackground="white", font=("Consolas", 10),
             relief="flat"
         )
@@ -286,12 +320,12 @@ class GuyClient:
 
         tk.Button(
             bar, text="Ativar/desativar", command=self.toggle_account,
-            bg="#303641", fg="white", relief="flat"
+            bg=COLOR2, fg="white", relief="flat"
         ).pack(side="left", padx=3)
 
         tk.Button(
             bar, text="Atualizar", command=self.refresh_accounts,
-            bg="#303641", fg="white", relief="flat"
+            bg=COLOR2, fg="white", relief="flat"
         ).pack(side="left", padx=3)
 
         self.account_tree = ttk.Treeview(
@@ -314,7 +348,7 @@ class GuyClient:
         tk.Label(
             self.accounts_tab,
             text="As contas são armazenadas no servidor central da Raspberry Pi.",
-            bg=BG, fg="#9ca3af"
+            bg=BG, fg=MUTED
         ).pack(anchor="w", padx=10, pady=5)
 
         self.refresh_accounts()
@@ -551,6 +585,17 @@ class GuyClient:
         except Exception as exc:
             messagebox.showerror("GUY ACCESS", str(exc))
 
+    def logout(self):
+        if self.sock and self.session:
+            try:
+                self.request({"action": "disconnect"})
+            except Exception:
+                pass
+
+        self.disconnect()
+        self.current_file = None
+        self.build_login()
+
     def disconnect(self):
         if self.sock:
             try:
@@ -575,6 +620,8 @@ class GuyClient:
 
 def main():
     root = tk.Tk()
+    apply_ttk_theme(root)
+    window_icon(root)
     GuyClient(root)
     root.mainloop()
 

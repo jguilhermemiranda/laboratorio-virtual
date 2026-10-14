@@ -1,0 +1,10 @@
+# Dependencias do desktop (GUY ACCESS + reconhecimento facial).
+# O servidor e o cliente GUYLAB usam apenas a biblioteca padrao do Python.
+# Limites inferiores escolhidos por criterio (nao testados em versoes antigas):
+# o main.py instala tudo sozinho em .venv.
+# opencv < 5: precaucao (o 5.0.0 falhou ao carregar o yunet.onnx 2023mar num PC
+# real; a causa pode ter sido o caminho com acento, nao a versao).
+pyserial>=3.5
+opencv-python>=4.8,<5
+numpy>=1.24
+Pillow>=10.0

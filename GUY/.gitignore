@@ -1,0 +1,15 @@
+# Ambiente e cache
+.venv/
+__pycache__/
+*.pyc
+
+# Dados locais: NUNCA versionar (hashes de senha, biometria facial, auditoria)
+*.db
+*.db-wal
+*.db-shm
+guy_settings.json
+workspaces/
+logs/
+
+# Baixado automaticamente pelo main.py
+models/

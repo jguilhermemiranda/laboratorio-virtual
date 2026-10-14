@@ -10,7 +10,12 @@ from tkinter import ttk, messagebox
 import serial
 from serial.tools import list_ports
 
-DB_FILE = "guy_access.db"
+from guy_common import (
+    ACCESS_DB, COLOR5, TEXT, apply_ttk_theme, brand_bar, load_settings,
+    save_setting, spawn_module, window_icon
+)
+
+DB_FILE = str(ACCESS_DB)
 PAIR_WINDOW = 15
 BAUD_RATE = 115200
 
@@ -271,9 +276,9 @@ class GuyAccess(tk.Tk):
         super().__init__()
 
         self.title("GUY ACCESS")
-        self.geometry("1050x720")
-        self.minsize(850, 600)
-        self.configure(bg="#1b0c1a")
+        self.geometry("1050x770")
+        self.minsize(850, 620)
+        window_icon(self)
 
         self.db = Database()
         self.events = queue.Queue()
@@ -292,47 +297,17 @@ class GuyAccess(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.close)
 
     def configure_style(self):
-        style = ttk.Style(self)
-        style.theme_use("clam")
-        style.configure(
-            "TFrame", background="#1b0c1a"
-        )
-        style.configure(
-            "TLabel", background="#1b0c1a", foreground="#f5eaf5"
-        )
-        style.configure(
-            "TButton", background="#6a2f68", foreground="white", padding=7
-        )
-        style.map(
-            "TButton", background=[("active", "#50234e")]
-        )
-        style.configure(
-            "TNotebook", background="#1b0c1a", borderwidth=0
-        )
-        style.configure(
-            "TNotebook.Tab", background="#351834",
-            foreground="white", padding=(12, 8)
-        )
-        style.map(
-            "TNotebook.Tab", background=[("selected", "#6a2f68")]
-        )
-        style.configure(
-            "Treeview", background="#241423", foreground="white",
-            fieldbackground="#241423", rowheight=26
-        )
-        style.configure(
-            "Treeview.Heading", background="#50234e", foreground="white"
-        )
+        apply_ttk_theme(self)
 
     def build_interface(self):
-        header = ttk.Frame(self, padding=12)
+        header = brand_bar(
+            self, "GUY ACCESS", "Controle de acesso · cartão RFID + digital"
+        )
         header.pack(fill="x")
 
-        ttk.Label(
-            header, text="GUY ACCESS", font=("Segoe UI", 20, "bold")
-        ).pack(side="left")
-
-        self.status = ttk.Label(header, text="Desconectado")
+        self.status = ttk.Label(
+            header, text="Desconectado", style="Header.TLabel"
+        )
         self.status.pack(side="right")
 
         connection = ttk.Frame(self, padding=(12, 0, 12, 10))
@@ -383,7 +358,7 @@ class GuyAccess(tk.Tk):
         self.build_audit_tab()
 
         self.console = tk.Text(
-            self, height=6, bg="#100810", fg="#eadbea",
+            self, height=6, bg=COLOR5, fg=TEXT,
             insertbackground="white", relief="flat"
         )
         self.console.pack(fill="x", padx=12, pady=(0, 12))
@@ -421,6 +396,11 @@ class GuyAccess(tk.Tk):
         ttk.Button(
             bar, text="Ativar/desativar",
             command=self.toggle_person
+        ).pack(side="left", padx=4)
+
+        ttk.Button(
+            bar, text="Cadastrar rosto",
+            command=self.enroll_face
         ).pack(side="left", padx=4)
 
         self.people_tree = self.make_tree(
@@ -505,7 +485,8 @@ class GuyAccess(tk.Tk):
         ports = self.serial.ports()
         self.port_box["values"] = ports
         if ports and self.port_var.get() not in ports:
-            self.port_var.set(ports[0])
+            saved = load_settings().get("access_serial_port")
+            self.port_var.set(saved if saved in ports else ports[0])
 
     def connect_serial(self):
         port = self.port_var.get()
@@ -514,6 +495,7 @@ class GuyAccess(tk.Tk):
             return
         try:
             self.serial.connect(port)
+            save_setting("access_serial_port", port)
             self.status.configure(text=f"Conectando: {port}")
             self.log(f"Conexão iniciada em {port}.")
         except Exception as exc:
@@ -573,6 +555,28 @@ class GuyAccess(tk.Tk):
             "Pessoa " + ("ativada" if active else "desativada")
         )
         self.refresh_all()
+
+    def enroll_face(self):
+        person_id = self.selected_person()
+        if person_id is None:
+            return
+
+        try:
+            _process, log_path = spawn_module(
+                "guy_face.py", ["--person-id", person_id],
+                log_name="face"
+            )
+        except OSError as exc:
+            messagebox.showerror(
+                "Reconhecimento facial",
+                f"Não foi possível iniciar o módulo facial: {exc}"
+            )
+            return
+
+        self.log(
+            f"Módulo facial aberto para a pessoa ID {person_id}. "
+            f"Log: {log_path.name}"
+        )
 
     def enroll_card(self):
         person_id = self.selected_person()

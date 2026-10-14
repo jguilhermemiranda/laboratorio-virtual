@@ -70,21 +70,24 @@ def create_user(username, display_name, password, permissions):
     salt = secrets.token_bytes(16)
     digest = password_hash(password, salt)
 
-    with db_connect() as db:
-        db.execute("""
-            INSERT INTO users (
-                username, display_name, salt, password_hash, active,
-                can_read, can_write, can_execute, can_manage_users,
-                created_at
-            ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
-        """, (
-            username, display_name, salt, digest,
-            int(bool(permissions.get("read", True))),
-            int(bool(permissions.get("write", False))),
-            int(bool(permissions.get("execute", False))),
-            int(bool(permissions.get("manage_users", False))),
-            int(time.time())
-        ))
+    try:
+        with db_connect() as db:
+            db.execute("""
+                INSERT INTO users (
+                    username, display_name, salt, password_hash, active,
+                    can_read, can_write, can_execute, can_manage_users,
+                    created_at
+                ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+            """, (
+                username, display_name, salt, digest,
+                int(bool(permissions.get("read", True))),
+                int(bool(permissions.get("write", False))),
+                int(bool(permissions.get("execute", False))),
+                int(bool(permissions.get("manage_users", False))),
+                int(time.time())
+            ))
+    except sqlite3.IntegrityError:
+        raise ValueError("Já existe um usuário com esse nome.") from None
 
 
 def get_user(username):
